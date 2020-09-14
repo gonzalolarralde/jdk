@@ -3173,8 +3173,11 @@ int os::active_processor_count() {
   return _processor_count;
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 uint os::processor_id() {
+#if defined(__arm64__)
+  return 0;
+#else
   // Get the initial APIC id and return the associated processor id. The initial APIC
   // id is limited to 8-bits, which means we can have at most 256 unique APIC ids. If
   // the system has more processors (or the initial APIC ids are discontiguous) the
@@ -3205,6 +3208,7 @@ uint os::processor_id() {
   assert(processor_id >= 0 && processor_id < os::processor_count(), "invalid processor id");
 
   return (uint)processor_id;
+#endif
 }
 #endif
 
