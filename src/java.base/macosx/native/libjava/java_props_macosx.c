@@ -238,7 +238,11 @@ void setOSNameAndVersion(java_props_t *sprops) {
     // Mac OS 10.9 includes the [NSProcessInfo operatingSystemVersion] function,
     // but it's not in the 10.9 SDK.  So, call it via objc_msgSend_stret.
     if ([[NSProcessInfo processInfo] respondsToSelector:@selector(operatingSystemVersion)]) {
+#if defined(__arm64__)
+        OSVerStruct (*procInfoFn)(id rec, SEL sel) = (OSVerStruct(*)(id, SEL))objc_msgSend;
+#else
         OSVerStruct (*procInfoFn)(id rec, SEL sel) = (OSVerStruct(*)(id, SEL))objc_msgSend_stret;
+#endif
         OSVerStruct osVer = procInfoFn([NSProcessInfo processInfo],
                                        @selector(operatingSystemVersion));
         NSString *nsVerStr;
