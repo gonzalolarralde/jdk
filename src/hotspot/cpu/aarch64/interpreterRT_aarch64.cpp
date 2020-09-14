@@ -383,6 +383,14 @@ void InterpreterRuntime::SignatureHandlerGenerator::generate(uint64_t fingerprin
 
 // Implementation of SignatureHandlerLibrary
 
+// If the ABI depends on the type size then it is expected that the value is properly
+// sign-extended to fit in the given type.
+#ifdef __APPLE__
+#  define abi_dep_copy(type, value, size, offset) write_partial((type) value, size, offset)
+#else
+#  define abi_dep_copy(type, value, size, offset) write_partial(value, size, offset)
+#endif
+
 void SignatureHandlerLibrary::pd_set_handler(address handler) {}
 
 
@@ -396,6 +404,43 @@ class SlowSignatureHandler
   intptr_t* _fp_identifiers;
   unsigned int _num_int_args;
   unsigned int _num_fp_args;
+  unsigned int _stack_offset = 0;
+
+void handle_padding(int pad) {
+#ifdef __APPLE__
+  if (_stack_offset % pad > 0) {
+    _stack_offset += pad - (_stack_offset % pad);
+  }
+
+  _to += _stack_offset / 8;
+  _stack_offset = _stack_offset % 8;
+#endif
+}
+
+// value should be sign and size adjusted to expected destination
+void write_partial(uint64_t value, int bit_size, int bit_offset) {
+#ifdef __APPLE__
+  uint64_t bit_mask = (1ULL << bit_size) - 1;
+
+  assert(bit_size < 64, "partials should be smaller than full word register size");
+  assert(bit_offset < 64, "offset too far");
+  assert((value & ~(bit_mask)) == 0, "value is not sign adjusted");
+
+  *_to = (*(uint64_t*)_to & ~(bit_mask << bit_offset)) | (value & bit_mask) << bit_offset;
+#else
+  *_to = value;
+#endif
+}
+
+void advance_offset(int by) {
+#ifdef __APPLE__
+  _stack_offset += by;
+  _to += _stack_offset / 8;
+  _stack_offset = _stack_offset % 8;  
+#else
+  _to++;
+#endif
+}
 
 virtual void pass_byte()
   {
@@ -406,7 +451,9 @@ virtual void pass_byte()
       *_int_args++ = from_obj;
       _num_int_args++;
     } else {
-      *_to++ = from_obj;
+      handle_padding(1);
+      abi_dep_copy(uint8_t, from_obj, 8, _stack_offset * 8);
+      advance_offset(1);
       _num_int_args++;
     }
   }
@@ -420,7 +467,9 @@ virtual void pass_short()
       *_int_args++ = from_obj;
       _num_int_args++;
     } else {
-      *_to++ = from_obj;
+      handle_padding(2);
+      abi_dep_copy(uint16_t, from_obj, 16, _stack_offset * 8);
+      advance_offset(2);
       _num_int_args++;
     }
   }
@@ -434,21 +483,25 @@ virtual void pass_short()
       *_int_args++ = from_obj;
       _num_int_args++;
     } else {
-      *_to++ = from_obj;
+      handle_padding(4);
+      abi_dep_copy(uint32_t, from_obj, 32, _stack_offset * 8);
+      advance_offset(4);
       _num_int_args++;
     }
   }
 
   virtual void pass_long()
   {
-    intptr_t from_obj = *(intptr_t*)(_from+Interpreter::local_offset_in_bytes(1));
+    int64_t from_obj = *(intptr_t*)(_from+Interpreter::local_offset_in_bytes(1));
     _from -= 2*Interpreter::stackElementSize;
 
     if (_num_int_args < Argument::n_int_register_parameters_c-1) {
       *_int_args++ = from_obj;
       _num_int_args++;
     } else {
-      *_to++ = from_obj;
+      handle_padding(8);
+      *_to = from_obj;
+      advance_offset(8);
       _num_int_args++;
     }
   }
@@ -462,7 +515,9 @@ virtual void pass_short()
       *_int_args++ = (*from_addr == 0) ? NULL : (intptr_t)from_addr;
       _num_int_args++;
     } else {
-      *_to++ = (*from_addr == 0) ? NULL : (intptr_t) from_addr;
+      handle_padding(8);
+      *_to = (*from_addr == 0) ? NULL : (intptr_t) from_addr;
+      advance_offset(8);
       _num_int_args++;
     }
   }
@@ -476,14 +531,16 @@ virtual void pass_short()
       *_fp_args++ = from_obj;
       _num_fp_args++;
     } else {
-      *_to++ = from_obj;
+      handle_padding(4);
+      abi_dep_copy(uint32_t, from_obj, 32, _stack_offset * 8);
+      advance_offset(4);
       _num_fp_args++;
     }
   }
 
   virtual void pass_double()
   {
-    intptr_t from_obj = *(intptr_t*)(_from+Interpreter::local_offset_in_bytes(1));
+    int64_t from_obj = *(intptr_t*)(_from+Interpreter::local_offset_in_bytes(1));
     _from -= 2*Interpreter::stackElementSize;
 
     if (_num_fp_args < Argument::n_float_register_parameters_c) {
@@ -491,7 +548,9 @@ virtual void pass_short()
       *_fp_identifiers |= (1ull << _num_fp_args); // mark as double
       _num_fp_args++;
     } else {
-      *_to++ = from_obj;
+      handle_padding(8);
+      *_to = from_obj;
+      advance_offset(8);
       _num_fp_args++;
     }
   }
