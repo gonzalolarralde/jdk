@@ -147,6 +147,9 @@ public:
   static void print_vm_info(outputStream* st);
 
   // main error reporting function
+  static void report_and_die(int id, const char* message, const char* detail, Thread* thread, address pc, 
+                             void* siginfo, void* context, const char* filename, int lineno, size_t size);
+
   static void report_and_die(int id, const char* message, const char* detail_fmt, va_list detail_args,
                              Thread* thread, address pc, void* siginfo, void* context,
                              const char* filename, int lineno, size_t size) ATTRIBUTE_PRINTF(3, 0);

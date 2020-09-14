@@ -106,7 +106,7 @@ else
 ## OS = Darwin ##
 ifeq ($(OS),Darwin)
 CPU             = $(shell uname -m)
-ARCH1=$(CPU:x86_64=amd64)
+ARCH1=$(subst arm64,aarch64,$(CPU:x86_64=amd64))
 ARCH=$(ARCH1:i686=i386)
 ifdef LP64
 CFLAGS/amd64    += -m64

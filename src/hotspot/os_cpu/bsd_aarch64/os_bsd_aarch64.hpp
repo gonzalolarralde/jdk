@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2020, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,43 +23,20 @@
  *
  */
 
-#ifndef CPU_AARCH64_INTERPRETERRT_AARCH64_HPP
-#define CPU_AARCH64_INTERPRETERRT_AARCH64_HPP
+#ifndef OS_CPU_BSD_AARCH64_OS_BSD_AARCH64_HPP
+#define OS_CPU_BSD_AARCH64_OS_BSD_AARCH64_HPP
 
-// This is included in the middle of class Interpreter.
-// Do not include files here.
+  static void setup_fpu();
 
-// native method calls
+  static bool is_allocatable(size_t bytes);
 
-class SignatureHandlerGenerator: public NativeSignatureIterator {
- private:
-  MacroAssembler* _masm;
-  unsigned int _num_fp_args;
-  unsigned int _num_int_args;
-  int _stack_offset;
+  // Used to register dynamic code cache area with the OS
+  // Note: Currently only used in 64 bit Windows implementations
+  static bool register_code_area(char *low, char *high) { return true; }
 
-  void handle_padding(int size);
-  void advance_offset(int size);
+  // Atomically copy 64 bits of data
+  static void atomic_copy64(const volatile void *src, volatile void *dst) {
+    *(jlong *) dst = *(const jlong *) src;
+  }
 
-  void pass_byte();
-  void pass_short();
-  void pass_int();
-  void pass_long();
-  void pass_float();
-  void pass_double();
-  void pass_object();
-
- public:
-  // Creation
-  SignatureHandlerGenerator(const methodHandle& method, CodeBuffer* buffer);
-
-  // Code generation
-  void generate(uint64_t fingerprint);
-
-  // Code generation support
-  static Register from();
-  static Register to();
-  static Register temp();
-};
-
-#endif // CPU_AARCH64_INTERPRETERRT_AARCH64_HPP
+#endif // OS_CPU_BSD_AARCH64_OS_BSD_AARCH64_HPP

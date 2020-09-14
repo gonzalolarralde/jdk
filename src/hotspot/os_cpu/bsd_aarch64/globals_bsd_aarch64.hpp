@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -23,43 +23,22 @@
  *
  */
 
-#ifndef CPU_AARCH64_INTERPRETERRT_AARCH64_HPP
-#define CPU_AARCH64_INTERPRETERRT_AARCH64_HPP
+#ifndef OS_CPU_BSD_X86_GLOBALS_BSD_X86_HPP
+#define OS_CPU_BSD_X86_GLOBALS_BSD_X86_HPP
 
-// This is included in the middle of class Interpreter.
-// Do not include files here.
+//
+// Sets the default values for platform dependent flags used by the runtime system.
+// (see globals.hpp)
+//
+define_pd_global(bool, DontYieldALot,            false);
+define_pd_global(intx, ThreadStackSize,          2048); // 0 => use system default
+define_pd_global(intx, VMThreadStackSize,        2048);
 
-// native method calls
+define_pd_global(intx, CompilerThreadStackSize,  2048);
 
-class SignatureHandlerGenerator: public NativeSignatureIterator {
- private:
-  MacroAssembler* _masm;
-  unsigned int _num_fp_args;
-  unsigned int _num_int_args;
-  int _stack_offset;
+define_pd_global(size_t, JVMInvokeMethodSlack,   8192);
 
-  void handle_padding(int size);
-  void advance_offset(int size);
+// Used on 64 bit platforms for UseCompressedOops base address
+define_pd_global(size_t, HeapBaseMinAddress,     2*G);
 
-  void pass_byte();
-  void pass_short();
-  void pass_int();
-  void pass_long();
-  void pass_float();
-  void pass_double();
-  void pass_object();
-
- public:
-  // Creation
-  SignatureHandlerGenerator(const methodHandle& method, CodeBuffer* buffer);
-
-  // Code generation
-  void generate(uint64_t fingerprint);
-
-  // Code generation support
-  static Register from();
-  static Register to();
-  static Register temp();
-};
-
-#endif // CPU_AARCH64_INTERPRETERRT_AARCH64_HPP
+#endif // OS_CPU_BSD_X86_GLOBALS_BSD_X86_HPP

@@ -82,6 +82,8 @@ class SignatureHandlerGeneratorBase : public NativeSignatureIterator {
   void generate(uint64_t fingerprint);
 
  private:
+  void pass_byte();
+  void pass_short();
   void pass_int();
   void pass_long();
   void pass_float();
