@@ -38,6 +38,9 @@ class SignatureHandlerGenerator: public NativeSignatureIterator {
   unsigned int _num_int_args;
   int _stack_offset;
 
+  void handle_padding(int size);
+  void advance_offset(int size);
+
   void pass_byte();
   void pass_short();
   void pass_int();

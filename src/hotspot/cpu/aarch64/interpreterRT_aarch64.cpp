@@ -51,6 +51,24 @@ InterpreterRuntime::SignatureHandlerGenerator::SignatureHandlerGenerator(
   _stack_offset = 0;
 }
 
+void InterpreterRuntime::SignatureHandlerGenerator::handle_padding(int size) {
+#ifdef __APPLE__
+  if (_stack_offset % size > 0) {
+    _stack_offset += size - (_stack_offset % size);
+  }
+#else
+  // noop
+#endif
+}
+
+void InterpreterRuntime::SignatureHandlerGenerator::advance_offset(int size) {
+#ifdef __APPLE__
+  _stack_offset += size;
+#else
+  _stack_offset += wordSize;
+#endif
+}
+
 void InterpreterRuntime::SignatureHandlerGenerator::pass_byte() {
   const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
 
@@ -84,9 +102,10 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_byte() {
     _num_int_args++;
     break;
   default:
+    handle_padding(1);
     __ ldr(r0, src);
     __ str(r0, Address(to(), _stack_offset));
-    _stack_offset += wordSize;
+    advance_offset(1);
     _num_int_args++;
     break;
   }
@@ -125,9 +144,10 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_short() {
     _num_int_args++;
     break;
   default:
+    handle_padding(2);
     __ ldr(r0, src);
     __ str(r0, Address(to(), _stack_offset));
-    _stack_offset += wordSize;
+    advance_offset(2);
     _num_int_args++;
     break;
   }
@@ -166,9 +186,10 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_int() {
     _num_int_args++;
     break;
   default:
+    handle_padding(4);
     __ ldr(r0, src);
     __ str(r0, Address(to(), _stack_offset));
-    _stack_offset += wordSize;
+    advance_offset(4);
     _num_int_args++;
     break;
   }
@@ -207,9 +228,10 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_long() {
     _num_int_args++;
     break;
   default:
+    handle_padding(8);
     __ ldr(r0, src);
     __ str(r0, Address(to(), _stack_offset));
-    _stack_offset += wordSize;
+    advance_offset(8);
     _num_int_args++;
     break;
   }
@@ -221,9 +243,17 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_float() {
   if (_num_fp_args < Argument::n_float_register_parameters_c) {
     __ ldrs(as_FloatRegister(_num_fp_args++), src);
   } else {
+    handle_padding(4);
+#ifdef __APPLE__
+    // iOS ABI expects a 4-byte sign extended value as it won't take the entire doubleword
+    // as it happens in aarch64 ABI.
+    __ ldr(r0, src);
+    __ str(r0, Address(to(), _stack_offset));
+#else
     __ ldrw(r0, src);
     __ strw(r0, Address(to(), _stack_offset));
-    _stack_offset += wordSize;
+#endif
+    advance_offset(4);
     _num_fp_args++;
   }
 }
@@ -234,9 +264,10 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_double() {
   if (_num_fp_args < Argument::n_float_register_parameters_c) {
     __ ldrd(as_FloatRegister(_num_fp_args++), src);
   } else {
+    handle_padding(8);
     __ ldr(r0, src);
     __ str(r0, Address(to(), _stack_offset));
-    _stack_offset += wordSize;
+    advance_offset(1);
     _num_fp_args++;
   }
 }
@@ -323,6 +354,7 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_object() {
     }
  default:
    {
+      handle_padding(8);
       __ add(r0, from(), Interpreter::local_offset_in_bytes(offset()));
       __ ldr(temp(), r0);
       Label L;
@@ -330,7 +362,7 @@ void InterpreterRuntime::SignatureHandlerGenerator::pass_object() {
       __ mov(r0, zr);
       __ bind(L);
       __ str(r0, Address(to(), _stack_offset));
-      _stack_offset += wordSize;
+      advance_offset(8);
       _num_int_args++;
       break;
    }
