@@ -5256,8 +5256,13 @@ void MacroAssembler::get_thread(Register dst) {
   RegSet saved_regs = RegSet::range(r0, r1) + lr - dst;
   push(saved_regs, sp);
 
+#ifdef __APPLE__
+  MacroAssembler::call_VM_leaf_base(CAST_FROM_FN_PTR(address, Thread::current), 0);
+#else
   mov(lr, CAST_FROM_FN_PTR(address, JavaThread::aarch64_get_thread_helper));
   blr(lr);
+#endif
+
   if (dst != c_rarg0) {
     mov(dst, c_rarg0);
   }
