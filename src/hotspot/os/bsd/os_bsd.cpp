@@ -645,6 +645,11 @@ objc_registerThreadWithCollector_t objc_registerThreadWithCollectorFunction = NU
 
 // Thread start routine for all newly created threads
 static void *thread_native_entry(Thread *thread) {
+  // FIXME: This needs to be either removed or better scoped as an arm-only patch to avoid having to deal early with W^X.
+  // Source: https://siguza.github.io/APRR/ - https://gist.github.com/claui/ea4248aa64d6a1b06c6d6ed80bc2d2b8#file-02-make-L92
+  unsigned long long mask;
+  asm volatile("mrs %0, s3_4_c15_c2_7" : "=r"(mask): :);
+  asm volatile("msr s3_4_c15_c2_7, %0" : : "r"(mask & 0xfffffffff0ffffff) :);
 
   thread->record_stack_base_and_size();
 

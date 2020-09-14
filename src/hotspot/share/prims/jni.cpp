@@ -3704,6 +3704,11 @@ DT_RETURN_MARK_DECL(CreateJavaVM, jint
                     , HOTSPOT_JNI_CREATEJAVAVM_RETURN(_ret_ref));
 
 static jint JNI_CreateJavaVM_inner(JavaVM **vm, void **penv, void *args) {
+  // FIXME: Disable W^X protection on the thread we're creating.
+  unsigned long long mask;  
+  asm volatile("mrs %0, s3_4_c15_c2_7" : "=r"(mask): :);
+  asm volatile("msr s3_4_c15_c2_7, %0" : : "r"(mask & 0xfffffffff0ffffff) :);
+
   HOTSPOT_JNI_CREATEJAVAVM_ENTRY((void **) vm, penv, args);
 
   jint result = JNI_ERR;
@@ -4046,6 +4051,11 @@ jint JNICALL jni_AttachCurrentThread(JavaVM *vm, void **penv, void *_args) {
     return JNI_ERR;
   }
 
+  // FIXME: Disable W^X protection on the thread we're attaching.
+  unsigned long long mask;  
+  asm volatile("mrs %0, s3_4_c15_c2_7" : "=r"(mask): :);
+  asm volatile("msr s3_4_c15_c2_7, %0" : : "r"(mask & 0xfffffffff0ffffff) :);
+
   JNIWrapper("AttachCurrentThread");
   jint ret = attach_current_thread(vm, penv, _args, false);
   HOTSPOT_JNI_ATTACHCURRENTTHREAD_RETURN(ret);
@@ -4168,6 +4178,11 @@ jint JNICALL jni_AttachCurrentThreadAsDaemon(JavaVM *vm, void **penv, void *_arg
   HOTSPOT_JNI_ATTACHCURRENTTHREADASDAEMON_RETURN((uint32_t) JNI_ERR);
     return JNI_ERR;
   }
+
+  // FIXME: Disable W^X protection on the thread we're attaching.
+  unsigned long long mask;  
+  asm volatile("mrs %0, s3_4_c15_c2_7" : "=r"(mask): :);
+  asm volatile("msr s3_4_c15_c2_7, %0" : : "r"(mask & 0xfffffffff0ffffff) :);
 
   JNIWrapper("AttachCurrentThreadAsDaemon");
   jint ret = attach_current_thread(vm, penv, _args, true);
