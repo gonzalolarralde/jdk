@@ -46,7 +46,7 @@
 
 #define UNSUPPORTED_ARCH "Unsupported architecture!"
 
-#if defined(x86_64) && !defined(amd64)
+#if defined(x86_64) && !defined(amd64) && !defined(aarch64)
 #define amd64 1
 #endif
 
@@ -178,6 +178,13 @@ static struct ps_prochandle* get_proc_handle(JNIEnv* env, jobject this_obj) {
     #define HSDB_FLOAT_STATE        x86_FLOAT_STATE64
     #define HSDB_THREAD_STATE_COUNT x86_THREAD_STATE64_COUNT
     #define HSDB_FLOAT_STATE_COUNT  x86_FLOAT_STATE64_COUNT
+#elif defined(__aarch64__)
+    #define hsdb_thread_state_t     arm_thread_state64_t
+    #define hsdb_float_state_t      arm_float_state64_t
+    #define HSDB_THREAD_STATE       ARM_THREAD_STATE64
+    #define HSDB_FLOAT_STATE        ARM_FLOAT_STATE64
+    #define HSDB_THREAD_STATE_COUNT MACHINE_THREAD_STATE_COUNT
+    #define HSDB_FLOAT_STATE_COUNT  ARM_FLOAT_STATE64_COUNT
 #else
     #error UNSUPPORTED_ARCH
 #endif
@@ -640,7 +647,8 @@ Java_sun_jvm_hotspot_debugger_bsd_BsdDebuggerLocal_getThreadIntegerRegisterSet0(
   registerArray = (*env)->NewLongArray(env, NPRGREG);
   CHECK_EXCEPTION_(0);
   primitiveArray = (*env)->GetLongArrayElements(env, registerArray, NULL);
-
+  // FIXME: add dump values for arm64 registers
+  #ifndef aarch64
   primitiveArray[REG_INDEX(R15)] = state.__r15;
   primitiveArray[REG_INDEX(R14)] = state.__r14;
   primitiveArray[REG_INDEX(R13)] = state.__r13;
@@ -669,6 +677,7 @@ Java_sun_jvm_hotspot_debugger_bsd_BsdDebuggerLocal_getThreadIntegerRegisterSet0(
   primitiveArray[REG_INDEX(DS)] = 0;
   primitiveArray[REG_INDEX(FSBASE)] = 0;
   primitiveArray[REG_INDEX(GSBASE)] = 0;
+  #endif
   print_debug("set registers\n");
 
   (*env)->ReleaseLongArrayElements(env, registerArray, primitiveArray, 0);
