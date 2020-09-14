@@ -1348,6 +1348,15 @@ void VMError::report_and_die(int id, const char* message, const char* detail_fmt
                              Thread* thread, address pc, void* siginfo, void* context, const char* filename,
                              int lineno, size_t size)
 {
+  char detail_buf[1024];
+  jio_vsnprintf(detail_buf, sizeof(detail_buf), detail_fmt, detail_args);
+  VMError::report_and_die(id, message, detail_buf, thread, pc, siginfo, context, filename, lineno, size);
+}
+
+void VMError::report_and_die(int id, const char* message, const char* detail, Thread* thread, address pc, 
+                             void* siginfo, void* context, const char* filename, int lineno, size_t size)
+{
+
   // A single scratch buffer to be used from here on.
   // Do not rely on it being preserved across function calls.
   static char buffer[O_BUFLEN];
@@ -1403,7 +1412,7 @@ void VMError::report_and_die(int id, const char* message, const char* detail_fmt
     _filename = filename;
     _lineno = lineno;
     _size = size;
-    jio_vsnprintf(_detail_msg, sizeof(_detail_msg), detail_fmt, detail_args);
+    strcpy(_detail_msg, detail);
 
     // first time
     _error_reported = true;

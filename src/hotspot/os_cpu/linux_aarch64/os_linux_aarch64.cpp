@@ -375,10 +375,7 @@ JVM_handle_linux_signal(int sig,
           tty->print_cr("trap: %s: (SIGILL)", msg);
         }
 
-        va_list detail_args;
-        VMError::report_and_die(INTERNAL_ERROR, msg, detail_msg, detail_args, thread,
-                                pc, info, ucVoid, NULL, 0, 0);
-        va_end(detail_args);
+        VMError::report_and_die(INTERNAL_ERROR, msg, detail_msg, thread, pc, info, ucVoid, NULL, 0, 0);
       }
       else
 
