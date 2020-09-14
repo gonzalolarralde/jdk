@@ -24,9 +24,10 @@
 #
 
 # Support macro for PLATFORM_EXTRACT_TARGET_AND_BUILD.
-# Converts autoconf style CPU name to OpenJDK style, into
-# VAR_CPU, VAR_CPU_ARCH, VAR_CPU_BITS and VAR_CPU_ENDIAN.
-AC_DEFUN([PLATFORM_EXTRACT_VARS_FROM_CPU],
+# Converts autoconf style CPU name and Vendor pair to OpenJDK 
+# style, into VAR_CPU, VAR_CPU_ARCH, VAR_CPU_BITS and 
+# VAR_CPU_ENDIAN.
+AC_DEFUN([PLATFORM_EXTRACT_VARS_FROM_CPU_AND_VENDOR],
 [
   # First argument is the cpu name from the trip/quad
   case "$1" in
@@ -53,6 +54,19 @@ AC_DEFUN([PLATFORM_EXTRACT_VARS_FROM_CPU],
       VAR_CPU_ARCH=alpha
       VAR_CPU_BITS=64
       VAR_CPU_ENDIAN=little
+      ;;
+    arm)
+      if test "$2" == "apple"; then
+        VAR_CPU=aarch64
+        VAR_CPU_ARCH=aarch64
+        VAR_CPU_BITS=64
+        VAR_CPU_ENDIAN=little
+      else
+        VAR_CPU=arm
+        VAR_CPU_ARCH=arm
+        VAR_CPU_BITS=32
+        VAR_CPU_ENDIAN=little
+      fi
       ;;
     arm*)
       VAR_CPU=arm
@@ -239,7 +253,7 @@ AC_DEFUN([PLATFORM_EXTRACT_TARGET_AND_BUILD],
 
   # Convert the autoconf OS/CPU value to our own data, into the VAR_OS/CPU variables.
   PLATFORM_EXTRACT_VARS_FROM_OS($build_os)
-  PLATFORM_EXTRACT_VARS_FROM_CPU($build_cpu)
+  PLATFORM_EXTRACT_VARS_FROM_CPU_AND_VENDOR($build_cpu, $build_vendor)
   # ..and setup our own variables. (Do this explicitly to facilitate searching)
   OPENJDK_BUILD_OS="$VAR_OS"
   if test "x$VAR_OS_TYPE" != x; then
@@ -269,7 +283,7 @@ AC_DEFUN([PLATFORM_EXTRACT_TARGET_AND_BUILD],
 
   # Convert the autoconf OS/CPU value to our own data, into the VAR_OS/CPU variables.
   PLATFORM_EXTRACT_VARS_FROM_OS($host_os)
-  PLATFORM_EXTRACT_VARS_FROM_CPU($host_cpu)
+  PLATFORM_EXTRACT_VARS_FROM_CPU_AND_VENDOR($host_cpu, $host_vendor)
   # ... and setup our own variables. (Do this explicitly to facilitate searching)
   OPENJDK_TARGET_OS="$VAR_OS"
   if test "x$VAR_OS_TYPE" != x; then
