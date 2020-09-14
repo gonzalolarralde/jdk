@@ -36,6 +36,16 @@
 #include "stack_zero.inline.hpp"
 #include "utilities/align.hpp"
 
+void InterpreterRuntime::SignatureHandlerGeneratorBase::pass_byte() {
+  push(T_INT);
+  _cif->nargs++;
+}
+
+void InterpreterRuntime::SignatureHandlerGeneratorBase::pass_short() {
+  push(T_INT);
+  _cif->nargs++;
+}
+
 void InterpreterRuntime::SignatureHandlerGeneratorBase::pass_int() {
   push(T_INT);
   _cif->nargs++;

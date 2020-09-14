@@ -51,6 +51,88 @@ InterpreterRuntime::SignatureHandlerGenerator::SignatureHandlerGenerator(
   _stack_offset = 0;
 }
 
+void InterpreterRuntime::SignatureHandlerGenerator::pass_byte() {
+  const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
+
+  switch (_num_int_args) {
+  case 0:
+    __ ldr(c_rarg1, src);
+    _num_int_args++;
+    break;
+  case 1:
+    __ ldr(c_rarg2, src);
+    _num_int_args++;
+    break;
+  case 2:
+    __ ldr(c_rarg3, src);
+    _num_int_args++;
+    break;
+  case 3:
+    __ ldr(c_rarg4, src);
+    _num_int_args++;
+    break;
+  case 4:
+    __ ldr(c_rarg5, src);
+    _num_int_args++;
+    break;
+  case 5:
+    __ ldr(c_rarg6, src);
+    _num_int_args++;
+    break;
+  case 6:
+    __ ldr(c_rarg7, src);
+    _num_int_args++;
+    break;
+  default:
+    __ ldr(r0, src);
+    __ str(r0, Address(to(), _stack_offset));
+    _stack_offset += wordSize;
+    _num_int_args++;
+    break;
+  }
+}
+
+void InterpreterRuntime::SignatureHandlerGenerator::pass_short() {
+  const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
+
+  switch (_num_int_args) {
+  case 0:
+    __ ldr(c_rarg1, src);
+    _num_int_args++;
+    break;
+  case 1:
+    __ ldr(c_rarg2, src);
+    _num_int_args++;
+    break;
+  case 2:
+    __ ldr(c_rarg3, src);
+    _num_int_args++;
+    break;
+  case 3:
+    __ ldr(c_rarg4, src);
+    _num_int_args++;
+    break;
+  case 4:
+    __ ldr(c_rarg5, src);
+    _num_int_args++;
+    break;
+  case 5:
+    __ ldr(c_rarg6, src);
+    _num_int_args++;
+    break;
+  case 6:
+    __ ldr(c_rarg7, src);
+    _num_int_args++;
+    break;
+  default:
+    __ ldr(r0, src);
+    __ str(r0, Address(to(), _stack_offset));
+    _stack_offset += wordSize;
+    _num_int_args++;
+    break;
+  }
+}
+
 void InterpreterRuntime::SignatureHandlerGenerator::pass_int() {
   const Address src(from(), Interpreter::local_offset_in_bytes(offset()));
 
@@ -282,6 +364,34 @@ class SlowSignatureHandler
   intptr_t* _fp_identifiers;
   unsigned int _num_int_args;
   unsigned int _num_fp_args;
+
+virtual void pass_byte()
+  {
+    jint from_obj = *(jint *)(_from+Interpreter::local_offset_in_bytes(0));
+    _from -= Interpreter::stackElementSize;
+
+    if (_num_int_args < Argument::n_int_register_parameters_c-1) {
+      *_int_args++ = from_obj;
+      _num_int_args++;
+    } else {
+      *_to++ = from_obj;
+      _num_int_args++;
+    }
+  }
+
+virtual void pass_short()
+  {
+    jint from_obj = *(jint *)(_from+Interpreter::local_offset_in_bytes(0));
+    _from -= Interpreter::stackElementSize;
+
+    if (_num_int_args < Argument::n_int_register_parameters_c-1) {
+      *_int_args++ = from_obj;
+      _num_int_args++;
+    } else {
+      *_to++ = from_obj;
+      _num_int_args++;
+    }
+  }
 
   virtual void pass_int()
   {
