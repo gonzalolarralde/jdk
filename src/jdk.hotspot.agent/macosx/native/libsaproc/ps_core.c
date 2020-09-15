@@ -36,6 +36,31 @@
 #include "sun_jvm_hotspot_debugger_amd64_AMD64ThreadContext.h"
 #endif
 
+#if defined(__i386__)
+    #define hsdb_thread_state_t     x86_thread_state_t
+    #define hsdb_float_state_t      x86_float_state_t
+    #define hsdb_exception_state_t  x86_exception_state_t
+    #define HSDB_THREAD_STATE       x86_THREAD_STATE
+    #define HSDB_FLOAT_STATE        x86_FLOAT_STATE
+    #define HSDB_EXCEPTION_STATE    x86_EXCEPTION_STATE
+#elif defined(__x86_64__)
+    #define hsdb_thread_state_t     x86_thread_state_t
+    #define hsdb_float_state_t      x86_float_state_t
+    #define hsdb_exception_state_t  x86_exception_state_t
+    #define HSDB_THREAD_STATE       x86_THREAD_STATE
+    #define HSDB_FLOAT_STATE        x86_FLOAT_STATE
+    #define HSDB_EXCEPTION_STATE    x86_EXCEPTION_STATE
+#elif defined(__aarch64__)
+    #define hsdb_thread_state_t     arm_thread_state_t
+    #define hsdb_float_state_t      arm_neon_state_t
+    #define hsdb_exception_state_t  arm_exception_state_t
+    #define HSDB_THREAD_STATE       ARM_THREAD_STATE
+    #define HSDB_FLOAT_STATE        ARM_NEON_STATE
+    #define HSDB_EXCEPTION_STATE    ARM_EXCEPTION_STATE
+#else
+    #error UNSUPPORTED_ARCH
+#endif
+
 // This file has the libproc implementation to read core files.
 // For live processes, refer to ps_proc.c. Portions of this is adapted
 // /modelled after Solaris libproc.so (in particular Pcore.c)
@@ -195,6 +220,8 @@ static ps_prochandle_ops core_ops = {
 void print_thread(sa_thread_info *threadinfo) {
   print_debug("thread added: %d\n", threadinfo->lwp_id);
   print_debug("registers:\n");
+  // FIXME: dump values for arm64 registers
+  #ifndef aarch64
   print_debug("  r_r15: 0x%" PRIx64 "\n", threadinfo->regs.r_r15);
   print_debug("  r_r14: 0x%" PRIx64 "\n", threadinfo->regs.r_r14);
   print_debug("  r_r13: 0x%" PRIx64 "\n", threadinfo->regs.r_r13);
@@ -216,6 +243,7 @@ void print_thread(sa_thread_info *threadinfo) {
   print_debug("  r_cs:  0x%" PRIx64 "\n", threadinfo->regs.r_cs);
   print_debug("  r_rsp: 0x%" PRIx64 "\n", threadinfo->regs.r_rsp);
   print_debug("  r_rflags: 0x%" PRIx64 "\n", threadinfo->regs.r_rflags);
+  #endif
 }
 
 // read all segments64 commands from core file
@@ -269,13 +297,13 @@ static bool read_core_segments(struct ps_prochandle* ph) {
           goto err;
         }
         size += sizeof(thread_fc);
-        if (fc.flavor == x86_THREAD_STATE) {
-          x86_thread_state_t thrstate;
-          if (read(fd, (void *)&thrstate, sizeof(x86_thread_state_t)) != sizeof(x86_thread_state_t)) {
+        if (fc.flavor == HSDB_THREAD_STATE) {
+          hsdb_thread_state_t thrstate;
+          if (read(fd, (void *)&thrstate, sizeof(hsdb_thread_state_t)) != sizeof(hsdb_thread_state_t)) {
             printf("Reading flavor, count failed.\n");
             goto err;
           }
-          size += sizeof(x86_thread_state_t);
+          size += sizeof(hsdb_thread_state_t);
           // create thread info list, update lwp_id later
           sa_thread_info* newthr = add_thread_info(ph, (pthread_t) -1, (lwpid_t) num_threads++);
           if (newthr == NULL) {
@@ -291,6 +319,8 @@ static bool read_core_segments(struct ps_prochandle* ph) {
 #define get_register_v(regst, regname) \
   regst.uts.ts64.##regname
 #endif // __DARWIN_UNIX03
+          // FIXME: dump values for arm64 registers
+          #ifndef aarch64
           newthr->regs.r_rax = get_register_v(thrstate, rax);
           newthr->regs.r_rbx = get_register_v(thrstate, rbx);
           newthr->regs.r_rcx = get_register_v(thrstate, rcx);
@@ -312,21 +342,22 @@ static bool read_core_segments(struct ps_prochandle* ph) {
           newthr->regs.r_cs  = get_register_v(thrstate, cs);
           newthr->regs.r_fs  = get_register_v(thrstate, fs);
           newthr->regs.r_gs  = get_register_v(thrstate, gs);
+          #endif
           print_thread(newthr);
-        } else if (fc.flavor == x86_FLOAT_STATE) {
-          x86_float_state_t flstate;
-          if (read(fd, (void *)&flstate, sizeof(x86_float_state_t)) != sizeof(x86_float_state_t)) {
+        } else if (fc.flavor == HSDB_FLOAT_STATE) {
+          hsdb_float_state_t flstate;
+          if (read(fd, (void *)&flstate, sizeof(hsdb_float_state_t)) != sizeof(hsdb_float_state_t)) {
             print_debug("Reading flavor, count failed.\n");
             goto err;
           }
-          size += sizeof(x86_float_state_t);
-        } else if (fc.flavor == x86_EXCEPTION_STATE) {
-          x86_exception_state_t excpstate;
-          if (read(fd, (void *)&excpstate, sizeof(x86_exception_state_t)) != sizeof(x86_exception_state_t)) {
+          size += sizeof(hsdb_float_state_t);
+        } else if (fc.flavor == HSDB_EXCEPTION_STATE) {
+          hsdb_exception_state_t excpstate;
+          if (read(fd, (void *)&excpstate, sizeof(hsdb_exception_state_t)) != sizeof(hsdb_exception_state_t)) {
             printf("Reading flavor, count failed.\n");
             goto err;
           }
-          size += sizeof(x86_exception_state_t);
+          size += sizeof(hsdb_exception_state_t);
         }
       }
     }

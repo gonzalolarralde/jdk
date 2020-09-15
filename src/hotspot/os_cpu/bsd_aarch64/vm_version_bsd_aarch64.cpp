@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2006, 2019, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2014, 2019, Red Hat Inc. All rights reserved.
+ * Copyright (c) 1997, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,533 @@
  */
 
 #include "precompiled.hpp"
+#include "asm/macroAssembler.hpp"
+#include "asm/macroAssembler.inline.hpp"
+#include "memory/resourceArea.hpp"
+#include "runtime/arguments.hpp"
+#include "runtime/java.hpp"
 #include "runtime/os.hpp"
+#include "runtime/stubCodeGenerator.hpp"
 #include "runtime/vm_version.hpp"
+#include "utilities/formatBuffer.hpp"
+#include "utilities/macros.hpp"
 
+#include OS_HEADER_INLINE(os)
+
+#ifndef HWCAP_ASIMD
+#define HWCAP_ASIMD (1<<1)
+#endif
+
+#ifndef HWCAP_AES
+#define HWCAP_AES   (1<<3)
+#endif
+
+#ifndef HWCAP_PMULL
+#define HWCAP_PMULL (1<<4)
+#endif
+
+#ifndef HWCAP_SHA1
+#define HWCAP_SHA1  (1<<5)
+#endif
+
+#ifndef HWCAP_SHA2
+#define HWCAP_SHA2  (1<<6)
+#endif
+
+#ifndef HWCAP_CRC32
+#define HWCAP_CRC32 (1<<7)
+#endif
+
+#ifndef HWCAP_ATOMICS
+#define HWCAP_ATOMICS (1<<8)
+#endif
+
+#ifndef HWCAP_SHA512
+#define HWCAP_SHA512 (1 << 21)
+#endif
+
+#ifndef HWCAP_SVE
+#define HWCAP_SVE (1 << 22)
+#endif
+
+#ifndef HWCAP2_SVE2
+#define HWCAP2_SVE2 (1 << 1)
+#endif
+
+#ifndef PR_SVE_GET_VL
+// For old toolchains which do not have SVE related macros defined.
+#define PR_SVE_SET_VL   50
+#define PR_SVE_GET_VL   51
+#endif
+
+int VM_Version::_cpu;
+int VM_Version::_model;
+int VM_Version::_model2;
+int VM_Version::_variant;
+int VM_Version::_revision;
+int VM_Version::_stepping;
+bool VM_Version::_dcpop;
+int VM_Version::_initial_sve_vector_length;
+VM_Version::PsrInfo VM_Version::_psr_info   = { 4, 2219098116 }; // FIXME
+
+static BufferBlob* stub_blob;
+static const int stub_size = 550;
+
+extern "C" {
+  typedef void (*getPsrInfo_stub_t)(void*);
+}
+static getPsrInfo_stub_t getPsrInfo_stub = NULL;
+
+
+class VM_Version_StubGenerator: public StubCodeGenerator {
+ public:
+
+  VM_Version_StubGenerator(CodeBuffer *c) : StubCodeGenerator(c) {}
+
+  address generate_getPsrInfo() {
+    StubCodeMark mark(this, "VM_Version", "getPsrInfo_stub");
+#   define __ _masm->
+    address start = __ pc();
+
+    // void getPsrInfo(VM_Version::PsrInfo* psr_info);
+
+    address entry = __ pc();
+
+    __ enter();
+
+    __ get_dczid_el0(rscratch1);
+    __ strw(rscratch1, Address(c_rarg0, in_bytes(VM_Version::dczid_el0_offset())));
+
+    __ get_ctr_el0(rscratch1);
+    __ strw(rscratch1, Address(c_rarg0, in_bytes(VM_Version::ctr_el0_offset())));
+
+    __ leave();
+    __ ret(lr);
+
+#   undef __
+
+    return start;
+  }
+};
+
+void VM_Version::get_processor_features() {
+  _supports_cx8 = true;
+  _supports_atomic_getset4 = true;
+  _supports_atomic_getadd4 = true;
+  _supports_atomic_getset8 = true;
+  _supports_atomic_getadd8 = true;
+
+  // getPsrInfo_stub(&_psr_info); // FIXME: fix me
+
+  int dcache_line = VM_Version::dcache_line_size();
+
+  // Limit AllocatePrefetchDistance so that it does not exceed the
+  // constraint in AllocatePrefetchDistanceConstraintFunc.
+  if (FLAG_IS_DEFAULT(AllocatePrefetchDistance))
+    FLAG_SET_DEFAULT(AllocatePrefetchDistance, MIN2(512, 3*dcache_line));
+
+  if (FLAG_IS_DEFAULT(AllocatePrefetchStepSize))
+    FLAG_SET_DEFAULT(AllocatePrefetchStepSize, dcache_line);
+  if (FLAG_IS_DEFAULT(PrefetchScanIntervalInBytes))
+    FLAG_SET_DEFAULT(PrefetchScanIntervalInBytes, 3*dcache_line);
+  if (FLAG_IS_DEFAULT(PrefetchCopyIntervalInBytes))
+    FLAG_SET_DEFAULT(PrefetchCopyIntervalInBytes, 3*dcache_line);
+  if (FLAG_IS_DEFAULT(SoftwarePrefetchHintDistance))
+    FLAG_SET_DEFAULT(SoftwarePrefetchHintDistance, 3*dcache_line);
+
+  if (PrefetchCopyIntervalInBytes != -1 &&
+       ((PrefetchCopyIntervalInBytes & 7) || (PrefetchCopyIntervalInBytes >= 32768))) {
+    warning("PrefetchCopyIntervalInBytes must be -1, or a multiple of 8 and < 32768");
+    PrefetchCopyIntervalInBytes &= ~7;
+    if (PrefetchCopyIntervalInBytes >= 32768)
+      PrefetchCopyIntervalInBytes = 32760;
+  }
+
+  if (AllocatePrefetchDistance !=-1 && (AllocatePrefetchDistance & 7)) {
+    warning("AllocatePrefetchDistance must be multiple of 8");
+    AllocatePrefetchDistance &= ~7;
+  }
+
+  if (AllocatePrefetchStepSize & 7) {
+    warning("AllocatePrefetchStepSize must be multiple of 8");
+    AllocatePrefetchStepSize &= ~7;
+  }
+
+  if (SoftwarePrefetchHintDistance != -1 &&
+       (SoftwarePrefetchHintDistance & 7)) {
+    warning("SoftwarePrefetchHintDistance must be -1, or a multiple of 8");
+    SoftwarePrefetchHintDistance &= ~7;
+  }
+
+  uint64_t auxv = 2183; // FIXME
+  uint64_t auxv2 = 0; // FIXME
+
+  char buf[512];
+
+  _features = auxv;
+
+  // FIXME
+  _int cpu_lines = 8;
+  _cpu = 0x41;
+  _variant = 0x0;
+  _model2 = _model;
+  _model = 0xd08;
+  _revision = 3;
+
+  if (os::supports_map_sync()) {
+    // if dcpop is available publish data cache line flush size via
+    // generic field, otherwise let if default to zero thereby
+    // disabling writeback
+    if (_dcpop) {
+      _data_cache_line_flush_size = dcache_line;
+    }
+  }
+
+  // Enable vendor specific features
+
+  // Ampere eMAG
+  if (_cpu == CPU_AMCC && (_model == 0) && (_variant == 0x3)) {
+    if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
+      FLAG_SET_DEFAULT(AvoidUnalignedAccesses, true);
+    }
+    if (FLAG_IS_DEFAULT(UseSIMDForMemoryOps)) {
+      FLAG_SET_DEFAULT(UseSIMDForMemoryOps, true);
+    }
+    if (FLAG_IS_DEFAULT(UseSIMDForArrayEquals)) {
+      FLAG_SET_DEFAULT(UseSIMDForArrayEquals, !(_revision == 1 || _revision == 2));
+    }
+  }
+
+  // ThunderX
+  if (_cpu == CPU_CAVIUM && (_model == 0xA1)) {
+    guarantee(_variant != 0, "Pre-release hardware no longer supported.");
+    if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
+      FLAG_SET_DEFAULT(AvoidUnalignedAccesses, true);
+    }
+    if (FLAG_IS_DEFAULT(UseSIMDForMemoryOps)) {
+      FLAG_SET_DEFAULT(UseSIMDForMemoryOps, (_variant > 0));
+    }
+    if (FLAG_IS_DEFAULT(UseSIMDForArrayEquals)) {
+      FLAG_SET_DEFAULT(UseSIMDForArrayEquals, false);
+    }
+  }
+
+  // ThunderX2
+  if ((_cpu == CPU_CAVIUM && (_model == 0xAF)) ||
+      (_cpu == CPU_BROADCOM && (_model == 0x516))) {
+    if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
+      FLAG_SET_DEFAULT(AvoidUnalignedAccesses, true);
+    }
+    if (FLAG_IS_DEFAULT(UseSIMDForMemoryOps)) {
+      FLAG_SET_DEFAULT(UseSIMDForMemoryOps, true);
+    }
+  }
+
+  // HiSilicon TSV110
+  if (_cpu == CPU_HISILICON && _model == 0xd01) {
+    if (FLAG_IS_DEFAULT(AvoidUnalignedAccesses)) {
+      FLAG_SET_DEFAULT(AvoidUnalignedAccesses, true);
+    }
+    if (FLAG_IS_DEFAULT(UseSIMDForMemoryOps)) {
+      FLAG_SET_DEFAULT(UseSIMDForMemoryOps, true);
+    }
+  }
+
+  // Cortex A53
+  if (_cpu == CPU_ARM && (_model == 0xd03 || _model2 == 0xd03)) {
+    _features |= CPU_A53MAC;
+    if (FLAG_IS_DEFAULT(UseSIMDForArrayEquals)) {
+      FLAG_SET_DEFAULT(UseSIMDForArrayEquals, false);
+    }
+  }
+
+  // Cortex A73
+  if (_cpu == CPU_ARM && (_model == 0xd09 || _model2 == 0xd09)) {
+    if (FLAG_IS_DEFAULT(SoftwarePrefetchHintDistance)) {
+      FLAG_SET_DEFAULT(SoftwarePrefetchHintDistance, -1);
+    }
+    // A73 is faster with short-and-easy-for-speculative-execution-loop
+    if (FLAG_IS_DEFAULT(UseSimpleArrayEquals)) {
+      FLAG_SET_DEFAULT(UseSimpleArrayEquals, true);
+    }
+  }
+
+  if (_cpu == CPU_ARM) {
+    if (FLAG_IS_DEFAULT(UseSignumIntrinsic)) {
+      FLAG_SET_DEFAULT(UseSignumIntrinsic, true);
+    }
+  }
+
+  if (_cpu == CPU_ARM && (_model == 0xd07 || _model2 == 0xd07)) _features |= CPU_STXR_PREFETCH;
+  // If an olde style /proc/cpuinfo (cpu_lines == 1) then if _model is an A57 (0xd07)
+  // we assume the worst and assume we could be on a big little system and have
+  // undisclosed A53 cores which we could be swapped to at any stage
+  if (_cpu == CPU_ARM && cpu_lines == 1 && _model == 0xd07) _features |= CPU_A53MAC;
+
+  sprintf(buf, "0x%02x:0x%x:0x%03x:%d", _cpu, _variant, _model, _revision);
+  if (_model2) sprintf(buf+strlen(buf), "(0x%03x)", _model2);
+  if (auxv & HWCAP_ASIMD) strcat(buf, ", simd");
+  if (auxv & HWCAP_CRC32) strcat(buf, ", crc");
+  if (auxv & HWCAP_AES)   strcat(buf, ", aes");
+  if (auxv & HWCAP_SHA1)  strcat(buf, ", sha1");
+  if (auxv & HWCAP_SHA2)  strcat(buf, ", sha256");
+  if (auxv & HWCAP_SHA512) strcat(buf, ", sha512");
+  if (auxv & HWCAP_ATOMICS) strcat(buf, ", lse");
+  if (auxv & HWCAP_SVE) strcat(buf, ", sve");
+  if (auxv2 & HWCAP2_SVE2) strcat(buf, ", sve2");
+
+  _features_string = os::strdup(buf);
+
+  if (FLAG_IS_DEFAULT(UseCRC32)) {
+    UseCRC32 = (auxv & HWCAP_CRC32) != 0;
+  }
+
+  if (UseCRC32 && (auxv & HWCAP_CRC32) == 0) {
+    warning("UseCRC32 specified, but not supported on this CPU");
+    FLAG_SET_DEFAULT(UseCRC32, false);
+  }
+
+  if (FLAG_IS_DEFAULT(UseAdler32Intrinsics)) {
+    FLAG_SET_DEFAULT(UseAdler32Intrinsics, true);
+  }
+
+  if (UseVectorizedMismatchIntrinsic) {
+    warning("UseVectorizedMismatchIntrinsic specified, but not available on this CPU.");
+    FLAG_SET_DEFAULT(UseVectorizedMismatchIntrinsic, false);
+  }
+
+  if (auxv & HWCAP_ATOMICS) {
+    if (FLAG_IS_DEFAULT(UseLSE))
+      FLAG_SET_DEFAULT(UseLSE, true);
+  } else {
+    if (UseLSE) {
+      warning("UseLSE specified, but not supported on this CPU");
+      FLAG_SET_DEFAULT(UseLSE, false);
+    }
+  }
+
+  if (auxv & HWCAP_AES) {
+    UseAES = UseAES || FLAG_IS_DEFAULT(UseAES);
+    UseAESIntrinsics =
+        UseAESIntrinsics || (UseAES && FLAG_IS_DEFAULT(UseAESIntrinsics));
+    if (UseAESIntrinsics && !UseAES) {
+      warning("UseAESIntrinsics enabled, but UseAES not, enabling");
+      UseAES = true;
+    }
+  } else {
+    if (UseAES) {
+      warning("AES instructions are not available on this CPU");
+      FLAG_SET_DEFAULT(UseAES, false);
+    }
+    if (UseAESIntrinsics) {
+      warning("AES intrinsics are not available on this CPU");
+      FLAG_SET_DEFAULT(UseAESIntrinsics, false);
+    }
+  }
+
+  if (UseAESCTRIntrinsics) {
+    warning("AES/CTR intrinsics are not available on this CPU");
+    FLAG_SET_DEFAULT(UseAESCTRIntrinsics, false);
+  }
+
+  if (FLAG_IS_DEFAULT(UseCRC32Intrinsics)) {
+    UseCRC32Intrinsics = true;
+  }
+
+  if (auxv & HWCAP_CRC32) {
+    if (FLAG_IS_DEFAULT(UseCRC32CIntrinsics)) {
+      FLAG_SET_DEFAULT(UseCRC32CIntrinsics, true);
+    }
+  } else if (UseCRC32CIntrinsics) {
+    warning("CRC32C is not available on the CPU");
+    FLAG_SET_DEFAULT(UseCRC32CIntrinsics, false);
+  }
+
+  if (FLAG_IS_DEFAULT(UseFMA)) {
+    FLAG_SET_DEFAULT(UseFMA, true);
+  }
+
+  if (UseMD5Intrinsics) {
+    warning("MD5 intrinsics are not available on this CPU");
+    FLAG_SET_DEFAULT(UseMD5Intrinsics, false);
+  }
+
+  if (auxv & (HWCAP_SHA1 | HWCAP_SHA2)) {
+    if (FLAG_IS_DEFAULT(UseSHA)) {
+      FLAG_SET_DEFAULT(UseSHA, true);
+    }
+  } else if (UseSHA) {
+    warning("SHA instructions are not available on this CPU");
+    FLAG_SET_DEFAULT(UseSHA, false);
+  }
+
+  if (UseSHA && (auxv & HWCAP_SHA1)) {
+    if (FLAG_IS_DEFAULT(UseSHA1Intrinsics)) {
+      FLAG_SET_DEFAULT(UseSHA1Intrinsics, true);
+    }
+  } else if (UseSHA1Intrinsics) {
+    warning("Intrinsics for SHA-1 crypto hash functions not available on this CPU.");
+    FLAG_SET_DEFAULT(UseSHA1Intrinsics, false);
+  }
+
+  if (UseSHA && (auxv & HWCAP_SHA2)) {
+    if (FLAG_IS_DEFAULT(UseSHA256Intrinsics)) {
+      FLAG_SET_DEFAULT(UseSHA256Intrinsics, true);
+    }
+  } else if (UseSHA256Intrinsics) {
+    warning("Intrinsics for SHA-224 and SHA-256 crypto hash functions not available on this CPU.");
+    FLAG_SET_DEFAULT(UseSHA256Intrinsics, false);
+  }
+
+  if (UseSHA && (auxv & HWCAP_SHA512)) {
+    // Do not auto-enable UseSHA512Intrinsics until it has been fully tested on hardware
+    // if (FLAG_IS_DEFAULT(UseSHA512Intrinsics)) {
+      // FLAG_SET_DEFAULT(UseSHA512Intrinsics, true);
+    // }
+  } else if (UseSHA512Intrinsics) {
+    warning("Intrinsics for SHA-384 and SHA-512 crypto hash functions not available on this CPU.");
+    FLAG_SET_DEFAULT(UseSHA512Intrinsics, false);
+  }
+
+  if (!(UseSHA1Intrinsics || UseSHA256Intrinsics || UseSHA512Intrinsics)) {
+    FLAG_SET_DEFAULT(UseSHA, false);
+  }
+
+  if (auxv & HWCAP_PMULL) {
+    if (FLAG_IS_DEFAULT(UseGHASHIntrinsics)) {
+      FLAG_SET_DEFAULT(UseGHASHIntrinsics, true);
+    }
+  } else if (UseGHASHIntrinsics) {
+    warning("GHASH intrinsics are not available on this CPU");
+    FLAG_SET_DEFAULT(UseGHASHIntrinsics, false);
+  }
+
+  if (is_zva_enabled()) {
+    if (FLAG_IS_DEFAULT(UseBlockZeroing)) {
+      FLAG_SET_DEFAULT(UseBlockZeroing, true);
+    }
+    if (FLAG_IS_DEFAULT(BlockZeroingLowLimit)) {
+      FLAG_SET_DEFAULT(BlockZeroingLowLimit, 4 * VM_Version::zva_length());
+    }
+  } else if (UseBlockZeroing) {
+    warning("DC ZVA is not available on this CPU");
+    FLAG_SET_DEFAULT(UseBlockZeroing, false);
+  }
+
+  if (auxv & HWCAP_SVE) {
+    if (FLAG_IS_DEFAULT(UseSVE)) {
+      FLAG_SET_DEFAULT(UseSVE, (auxv2 & HWCAP2_SVE2) ? 2 : 1);
+    }
+    if (UseSVE > 0) {
+      _initial_sve_vector_length = -1; // FIXME
+    }
+  } else if (UseSVE > 0) {
+    warning("UseSVE specified, but not supported on current CPU. Disabling SVE.");
+    FLAG_SET_DEFAULT(UseSVE, 0);
+  }
+
+  // This machine allows unaligned memory accesses
+  if (FLAG_IS_DEFAULT(UseUnalignedAccesses)) {
+    FLAG_SET_DEFAULT(UseUnalignedAccesses, true);
+  }
+
+  if (FLAG_IS_DEFAULT(UsePopCountInstruction)) {
+    FLAG_SET_DEFAULT(UsePopCountInstruction, true);
+  }
+
+  if (!UsePopCountInstruction) {
+    warning("UsePopCountInstruction is always enabled on this CPU");
+    UsePopCountInstruction = true;
+  }
+
+#ifdef COMPILER2
+  if (FLAG_IS_DEFAULT(UseMultiplyToLenIntrinsic)) {
+    UseMultiplyToLenIntrinsic = true;
+  }
+
+  if (FLAG_IS_DEFAULT(UseSquareToLenIntrinsic)) {
+    UseSquareToLenIntrinsic = true;
+  }
+
+  if (FLAG_IS_DEFAULT(UseMulAddIntrinsic)) {
+    UseMulAddIntrinsic = true;
+  }
+
+  if (FLAG_IS_DEFAULT(UseMontgomeryMultiplyIntrinsic)) {
+    UseMontgomeryMultiplyIntrinsic = true;
+  }
+  if (FLAG_IS_DEFAULT(UseMontgomerySquareIntrinsic)) {
+    UseMontgomerySquareIntrinsic = true;
+  }
+
+  if (UseSVE > 0) {
+    if (FLAG_IS_DEFAULT(MaxVectorSize)) {
+      MaxVectorSize = _initial_sve_vector_length;
+    } else if (MaxVectorSize < 16) {
+      warning("SVE does not support vector length less than 16 bytes. Disabling SVE.");
+      UseSVE = 0;
+    } else if ((MaxVectorSize % 16) == 0 && is_power_of_2(MaxVectorSize)) {
+      int new_vl = -1; // FIXME
+      _initial_sve_vector_length = new_vl;
+      // If MaxVectorSize is larger than system largest supported SVE vector length, above prctl()
+      // call will set task vector length to the system largest supported value. So, we also update
+      // MaxVectorSize to that largest supported value.
+      if (new_vl < 0) {
+        vm_exit_during_initialization(
+          err_msg("Current system does not support SVE vector length for MaxVectorSize: %d",
+                  (int)MaxVectorSize));
+      } else if (new_vl != MaxVectorSize) {
+        warning("Current system only supports max SVE vector length %d. Set MaxVectorSize to %d",
+                new_vl, new_vl);
+      }
+      MaxVectorSize = new_vl;
+    } else {
+      vm_exit_during_initialization(err_msg("Unsupported MaxVectorSize: %d", (int)MaxVectorSize));
+    }
+  }
+
+  if (UseSVE == 0) {  // NEON
+    int min_vector_size = 8;
+    int max_vector_size = 16;
+    if (!FLAG_IS_DEFAULT(MaxVectorSize)) {
+      if (!is_power_of_2(MaxVectorSize)) {
+        vm_exit_during_initialization(err_msg("Unsupported MaxVectorSize: %d", (int)MaxVectorSize));
+      } else if (MaxVectorSize < min_vector_size) {
+        warning("MaxVectorSize must be at least %i on this platform", min_vector_size);
+        FLAG_SET_DEFAULT(MaxVectorSize, min_vector_size);
+      } else if (MaxVectorSize > max_vector_size) {
+        warning("MaxVectorSize must be at most %i on this platform", max_vector_size);
+        FLAG_SET_DEFAULT(MaxVectorSize, max_vector_size);
+      }
+    } else {
+      FLAG_SET_DEFAULT(MaxVectorSize, 16);
+    }
+  }
+
+  if (FLAG_IS_DEFAULT(OptoScheduling)) {
+    OptoScheduling = true;
+  }
+
+  if (FLAG_IS_DEFAULT(AlignVector)) {
+    AlignVector = AvoidUnalignedAccesses;
+  }
+#endif
+}
+
+void VM_Version::initialize() {
+  ResourceMark rm;
+
+  stub_blob = BufferBlob::create("getPsrInfo_stub", stub_size);
+  if (stub_blob == NULL) {
+    vm_exit_during_initialization("Unable to allocate getPsrInfo_stub");
+  }
+
+  CodeBuffer c(stub_blob);
+  VM_Version_StubGenerator g(&c);
+  getPsrInfo_stub = CAST_TO_FN_PTR(getPsrInfo_stub_t,
+                                   g.generate_getPsrInfo());
+
+  get_processor_features();
+
+  UNSUPPORTED_OPTION(CriticalJNINatives);
+}

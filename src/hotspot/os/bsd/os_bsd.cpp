@@ -645,6 +645,11 @@ objc_registerThreadWithCollector_t objc_registerThreadWithCollectorFunction = NU
 
 // Thread start routine for all newly created threads
 static void *thread_native_entry(Thread *thread) {
+  // FIXME: This needs to be either removed or better scoped as an arm-only patch to avoid having to deal early with W^X.
+  // Source: https://siguza.github.io/APRR/ - https://gist.github.com/claui/ea4248aa64d6a1b06c6d6ed80bc2d2b8#file-02-make-L92
+  unsigned long long mask;
+  asm volatile("mrs %0, s3_4_c15_c2_7" : "=r"(mask): :);
+  asm volatile("msr s3_4_c15_c2_7, %0" : : "r"(mask & 0xfffffffff0ffffff) :);
 
   thread->record_stack_base_and_size();
 
@@ -3173,8 +3178,11 @@ int os::active_processor_count() {
   return _processor_count;
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 uint os::processor_id() {
+#if defined(__arm64__)
+  return 0;
+#else
   // Get the initial APIC id and return the associated processor id. The initial APIC
   // id is limited to 8-bits, which means we can have at most 256 unique APIC ids. If
   // the system has more processors (or the initial APIC ids are discontiguous) the
@@ -3205,6 +3213,7 @@ uint os::processor_id() {
   assert(processor_id >= 0 && processor_id < os::processor_count(), "invalid processor id");
 
   return (uint)processor_id;
+#endif
 }
 #endif
 

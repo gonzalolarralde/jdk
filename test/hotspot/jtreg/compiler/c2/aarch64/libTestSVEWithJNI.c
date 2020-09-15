@@ -29,7 +29,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/prctl.h>
+// #include <sys/prctl.h>
 #include <unistd.h>
 
 #ifndef PR_SVE_GET_VL
@@ -39,11 +39,13 @@
 #endif
 
 int get_current_thread_vl() {
-  return prctl(PR_SVE_GET_VL);
+  return -1;
+  // return prctl(PR_SVE_GET_VL);
 }
 
 int set_current_thread_vl(unsigned long arg) {
-  return prctl(PR_SVE_SET_VL, arg);
+  return 0;
+  // return prctl(PR_SVE_SET_VL, arg);
 }
 
 #ifdef __cplusplus

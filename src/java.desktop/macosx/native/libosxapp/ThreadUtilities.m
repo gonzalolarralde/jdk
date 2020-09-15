@@ -45,6 +45,11 @@ static inline void attachCurrentThread(void** env) {
     } else {
         (*jvm)->AttachCurrentThreadAsDaemon(jvm, env, NULL);
     }
+
+    // FIXME: Disable W^X protection on the thread we're joining to.
+    unsigned long long mask;
+    __asm volatile("mrs %0, s3_4_c15_c2_7" : "=r"(mask): :);
+    __asm volatile("msr s3_4_c15_c2_7, %0" : : "r"(mask & 0xfffffffff0ffffff) :);
 }
 
 @implementation ThreadUtilities
